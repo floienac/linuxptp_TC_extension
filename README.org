@@ -280,77 +280,77 @@ grep -rn -A 1 "Transparent clock extension -->"
 
 ** User guide
 
-In what follows we describe the options that are used to compile and run the 
-linuxptp instances. 
-To compile, simply use:
+	In what follows we describe the options that are used to compile and run the 
+	linuxptp instances. 
+	To compile, simply use:
 
-#+BEGIN_EXAMPLE
-make
-sudo make install
-#+END_EXAMPLE
+	#+BEGIN_EXAMPLE
+	make
+	sudo make install
+	#+END_EXAMPLE
 
 *** First configuration steps:
 
-1. The transparent clock machine must be set as a bridge so that Ethernet frames
-	can go through. Use the "setBridge.sh" script that uses the iproute2 tool to 
-	setup the bridge as following:
+	1. The transparent clock machine must be set as a bridge so that Ethernet frames
+		can go through. Use the "setBridge.sh" script that uses the iproute2 tool to 
+		setup the bridge as following:
+		
+		#+BEGIN_EXAMPLE
+		sudo ./setBridge.sh -m a my_bridge -i ens2f0 -i ens2f1
+		#+END_EXAMPLE
 
-#+BEGIN_EXAMPLE
-sudo ./setBridge.sh -m a my_bridge -i ens2f0 -i ens2f1
-#+END_EXAMPLE
-
-#+BEGIN_EXAMPLE
-sudo ./setBridge.sh -m d my_bridge
-#+END_EXAMPLE
-
-	Options are:
-	- "-m <a|d>" (a=add, d=delete)
-	- "-n <name>"
-	- "-i <interface>" (interfaces added to the bridge)
-
-2. The PTP messages should be blocked by the bridge to keep them for handling in
-	userspace instead of immediate transfer. When the bridge is UP, run:
-
-#+BEGIN_EXAMPLE
-sudo ./setPtpBridgeRuleset.sh
-#+END_EXAMPLE
-
-	That will filter (don't forward) the PTP multicast MAC addresses (linuxptp 
-	should be running with IEEE 802.3 Ethernet transport).
-
-3. In the TC, allow the system to synchronize its PHC devices (i.e., the 
-	physical clocks attached to the different ports/interfaces) by running: 
-
-#+BEGIN_EXAMPLE
-sudo phc2sys -am
-#+END_EXAMPLE
-
-	Options are:
-	- "-m" (print messages)
-	- "-a" (automatically select PHC devices from the running ptp4l)
-
-4. Finally, check that no other time synchronization is running in the TC and 
-	the slave:
-
-#+BEGIN_EXAMPLE
-sudo timedatectl status
-#+END_EXAMPLE
-
-	If a network synchronization is on, enter the following to stop it: 
-
-#+BEGIN_EXAMPLE
-systemctl stop systemd-timesyncd.service
-#+END_EXAMPLE
-
-	Note: it can be necessary to 'disable' it instead (and reboot).
-
+		#+BEGIN_EXAMPLE
+		sudo ./setBridge.sh -m d my_bridge
+		#+END_EXAMPLE
+		
+		Options are:
+		- "-m <a|d>" (a=add, d=delete)
+		- "-n <name>"
+		- "-i <interface>" (interfaces added to the bridge)
+		
+	2. The PTP messages should be blocked by the bridge to keep them for handling in
+		userspace instead of immediate transfer. When the bridge is UP, run:
+		
+		#+BEGIN_EXAMPLE
+		sudo ./setPtpBridgeRuleset.sh
+		#+END_EXAMPLE
+		
+		That will filter (don't forward) the PTP multicast MAC addresses (linuxptp 
+		should be running with IEEE 802.3 Ethernet transport).
+		
+	3. In the TC, allow the system to synchronize its PHC devices (i.e., the 
+		physical clocks attached to the different ports/interfaces) by running: 
+		
+		#+BEGIN_EXAMPLE
+		sudo phc2sys -am
+		#+END_EXAMPLE
+		
+		Options are:
+		- "-m" (print messages)
+		- "-a" (automatically select PHC devices from the running ptp4l)
+		
+	4. Finally, check that no other time synchronization is running in the TC and 
+		the slave:
+		
+		#+BEGIN_EXAMPLE
+		sudo timedatectl status
+		#+END_EXAMPLE
+		
+		If a network synchronization is on, enter the following to stop it: 
+		
+		#+BEGIN_EXAMPLE
+		systemctl stop systemd-timesyncd.service
+		#+END_EXAMPLE
+		
+		Note: it can be necessary to 'disable' it instead (and reboot).
+		
 *** Run:
 
 	Simply add the following options to:
 
-#+BEGIN_EXAMPLE
-sudo ptp4l
-#+END_EXAMPLE
+	#+BEGIN_EXAMPLE
+	sudo ptp4l
+	#+END_EXAMPLE
 
 	Common options:
 
