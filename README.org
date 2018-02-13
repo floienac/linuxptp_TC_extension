@@ -1,0 +1,390 @@
+* Introduction
+
+  This software is a patch to "linuxptp" implementing a PTP transparent 
+  clock according to IEEE standard 1588 for Linux.
+
+* License
+
+  The software is copyrighted by the authors and is licensed under the
+  GNU General Public License. See the file, COPYING, for details of
+  the license terms.
+
+* Features
+
+  - Supports hardware time stamping only
+
+  - Supports the Linux PTP Hardware Clock (PHC) subsystem by using the
+    clock_gettime family of calls, including the new clock_adjtimex
+    system call.
+
+  - Implements Transparent Clock (TC).
+
+  - Transport over raw Ethernet (Layer 2) only.
+
+  - Supports peer-to-peer (P2P) path delay measurements only.
+
+* System Requirements
+
+  In order to run this software, you need Linux kernel
+  version 3.0 or newer, and the kernel header files must available at
+  compile time.
+
+  In addition, you will also need to have either:
+
+  1. A supported Ethernet MAC device.
+
+  2. A supported PHY device paired with a MAC that allows time
+     stamping in the PHY (indicated by PHY=Y in the table below).
+
+** Linux Kernel Support
+
+   In order to support PTP, the operating system needs to provide two
+   services: network packet time stamping and clock control. In 2009,
+   Patrick Ohly added a new socket option called SO_TIMESTAMPING for
+   packet time stamping, especially for PTP. This work appeared in
+   Linux version 2.6.30.
+
+   In July of 2011, the PTP Hardware Clock (PHC) subsystem was merged
+   into Linux version 3.0. The PHC code provides a driver framework and
+   the user space API for clock control.
+
+** Ethtool Support
+
+   Starting with version 3.5 of the Linux kernel, you can query the
+   time stamping capabilities of a network interface using the
+   ETHTOOL_GET_TS_INFO ioctl. Using ethtool version 3.4 or later, you
+   can check your system's time stamping support as shown in the
+   following example.
+
+#+BEGIN_EXAMPLE
+  ethtool -T eth0
+#+END_EXAMPLE
+
+   If the ethtool ioctl is available, then the ptp4l program will use
+   it in order to discover the proper PHC device.
+
+
+* Installation
+
+** PTP stack
+
+   1. Just type 'make'
+
+   2. If you compiled your own kernel (and the headers are not
+      installed into the system path), then you should set the
+      KBUILD_OUTPUT environment variable as in the example, above.
+
+   3. In order to install the programs and man pages into /usr/local,
+      run the 'make install' target. You can change the installation
+      directories by setttings the variables prefix, sbindir, mandir,
+      and man8dir on the make command line.
+
+
+###############################################################################
+* Patch features and content
+
+** High-level functional changes in linuxptp code
+
+In this part, the main features added to linuxptp are described from a 
+high-level point of view.
+
+The code does now provide a TC feature without disrupting the normal 
+master/slave behavior. It means that the same code is used in the 3 instances 
+but with different options. They are described in the user guide.
+
+- The TC can go into a TRANSPARENT state to behave like a TC. It is mainly 
+done in clock.c.
+
+- The TC can receive PTP messages from the master or the slave on a port and 
+decide which ones should be forwarded to the other side port. It is mainly 
+done during the messages processing in port.c.
+
+- If necessary, the TC updates the correction field of the message to 
+compensate its presence on the path. It is mainly done in port.c.
+
+- From the master and the slave point of view, it is like if there is no 
+TC in the middle.
+
+- The path delay measurement is done by all 3 instances with P2P messages 
+exchange. It was already done but it's important to repeat not to use E2E.
+
+- The TC does not update its own clock (because it is not needed) but updates 
+its path delay to the master and shows its offset to it. 
+
+- The TC uses precise hardware time stamping to measure the arrival and 
+departure time and calculate the residence time of messages. It is done in 
+port.c.
+
+
+** Implementation changes in linuxptp code
+
+In what follows we describe the changes and the new functions added into the 
+existing linuxptp code.
+Code added to the source code is marked throughout, and all added and modified 
+code can be found using : 
+
+#+BEGIN_EXAMPLE
+  grep -rn -A 1 "Transparent clock extension -->"
+#+END_EXAMPLE
+
+Important changes concerning the TC mode (by file and function):
+
+*** ptp4l.c:
+	- usage, main: deal with "-T" option, set "transparentClock"
+	- main: select "clock_type" depending on case
+    
+*** clock.c:
+	- clock (struct): new member "tc_residence_time" for EVENT messages 
+	going through a TC
+	- clock_management_fill_response: allow remote clock management 
+	with "DDS_TRANSPARENT" in "TLV_TRANSPARENT"
+	- clock_create: set "type" of clock to be created
+	- clock_create: set "DDS_TRANSPARENT" with "transparentClock" from 
+	configuration
+	- clock_create: do not allow ONE_STEP mode for a TC
+	- clock_create: initialize "tc_residence_time" to 0
+	- tc_port_by_side: new function to get a port by its side in TC (easier
+	 than remember the MAC addresses)
+	- tc_residence_time_set: setter function for the new private member 
+	"tc_residence_time"
+	- tc_residence_time_get: getter function for the new private member 
+	"tc_residence_time"
+	- clock_transparent: check if TC mode active reading "DDS_TRANSPARENT"
+	- clock_synchronize: force "SERVO_LOCKED" state for servo because a TC 
+	does not update its own system clock (free running) but should not go 
+	to "UNCALIBRATED" like a slave
+	- handle_state_decision_event: don't run BMC algorithm in TC mode
+	- handle_state_decision_event: allow transition to "PS_TRANSPARENT" 
+	state
+
+*** clock.h:
+    	- tc_port_side (enum): forward declaration of new port side value 
+	(really here ?)
+    	- clock_type (enum): new clock type "CLOCK_TYPE_TRANSPARENT"
+        - clock_transparent: prototype
+
+*** port.c:
+    	- syfu_state, syfu_event, link_state (enums): moved to port.h (seems 
+	more logical but is it correct ?)
+        - port (struct): new member "side" to manipulate easily the TC ports
+        - tc_relay_general_msg: new function to allow the TC to transfer an 
+	exact copy (shallow, not deep) of any general message (ANNOUNCE for now
+	 but MANAGEMENT or SIGNALING as well)
+        - tc_residence_time: new function to calculate the precise HW residence
+	 time of an event message in 2 steps: one after receiving and one after
+	 sending (uses the hwts.ts field of messages)
+        - tc_relay_follow_up: new function to allow the TC to transfer a deep 
+	copy of a FOLLOW_UP message (to be sure it is not modified elsewhere 
+	before it is sent) and uses the correction field to compensate the 
+	residence time and the Master-TC delay.
+        - tc_relay_sync: new function to allow the TC to transfer a deep copy 
+	of a SYNC message (to be sure it is not modified elsewhere before it 
+	is sent)
+        - port_syfufsm: SYNC and FOLLOW_UP relayed here by the TC to allow out 
+	of order messages and don't disrupt the port and clock synchronization 
+	(messages are deep copies modified or not and are sent right away if 
+	they are in the right order)
+
+        - process_announce: add the master information and transfer the 
+	ANNOUNCE message received (exactly the same, not a deep copy)
+        - process_follow_up: just be able to detect a problem during FOLLOW_UP 
+	transfer by the TC (relay the message is done in port_syfufsm)
+        - port_peer_delay: port on side SIDE_SLAVE of the TC should not update 
+	the clock peer delay value but keep its own value for itself
+        - process_sync: just be able to detect a problem during SINC transfer 
+	by the TC (relay the message is done in port_syfufsm) and prevent again
+	 from using ONE_STEP mode in a TC
+        - port_e2e_transition: prevent from using E2E delay measurement in a TC
+        - port_p2p_transition: set ANNOUNCE timeout in a TC as well
+        - port_dispatch: do not detect any fault and don't switch PHC in a TC 
+	if state is UNCALIBRATED with jbod (just a bunch of devices) option 
+	active
+        - port_event: prevent from using E2E delay measurement in a TC and 
+	allow to detect a problem during the TC message transfer
+        - tc_port_side_get: new getter function for the side attribute of a 
+	port in a TC
+        - tc_other_side_port: new function to compute the outgoing port of an 
+	incoming message in a TC (not really useful probably but allows error 
+	handling)
+        - port_open: select a new specific state machine for if TC mode active 
+	and set side of port (by default the first port is SIDE_MASTER and the 
+	second one is SIDE_SLAVE)
+
+*** port.h:
+    	- syfu_state, syfu_event, link_state (enums): moved from port.c (seems 
+	more logical but is it correct ?)
+        - tc_port_side (enum): type to define a new attribute "side" to a port 
+	in a TC (can be SIDE_MASTER, SIDE_SLAVE or SIDE_UNKNOWN)
+        - tc_port_side_get: prototype
+        - tc_other_side_port: prototype
+
+*** msg.c:
+    	- msg_common_deep_memcpy: new function to deeply copy the common parts 
+	of a PTP message
+    	- msg_deep_memcpy: new function to deeply copy the varying parts of a 
+	PTP massage (only SYNC or FOLLOW_UP for now)
+
+*** msg.h:
+    	- msg_common_deep_memcpy: prototype
+        - msg_deep_memcpy: prototype
+    
+*** config.c:
+    	- config_tab (Items table): new item for TC option default value 
+	(disabled)
+
+*** fsm.c:
+    	- ptp_fsm, ptp_slave_fsm: add default to main case to include 
+	PS_TRANSPARENT state
+    	- ptp_tc_fsm: new FSM describing the state transition policy in a TC 
+	(should be reviewed to check and test all cases)
+
+*** fsm.h:
+    	- port_state (enum): add new state PS_TRANSPARENT
+    	- fsm_event (enum): add a new event EV_RS_TRANSPARENT
+        - ptp_tc_fsm: prototype
+
+*** pmc.c:
+    	- management_id (ID table): value of a TC TLV ID for clock management
+    	- pmc_show: TLV_TRANSPARENT case for TC management
+    
+*** tmv.h:
+    	- tmv_to_correction: new function to convert tmv_t time value expressed
+	 in ns into an Integer64 in order to put into in a message correction 
+	field
+        - TimeInterval_to_tmv: new function to convert Integer64 (equivalent to
+	 correction format) value into a tmv_t expressed in ns for easier 
+	display
+    
+*** util.c:
+    	- ps_str, ev_str (strings tables): define the strings to refer to the 
+	TC main state and event
+
+*** pmc_common.c:
+    	- pmc_tlv_datalen: TLV_TRANSPARENT case for clock management
+
+*** ds.h:
+    	- DDS_TRANSPARENT (#define): binary value of clock data set flag
+    
+*** tlv.h:
+    	- TLV_TRANSPARENT (#define): hexadecimal value of TLV ID for clock 
+	management
+
+
+** User guide
+
+In what follows we describe the options that are used to compile and run the 
+linuxptp instances. 
+To compile, simply use:
+
+#+BEGIN_EXAMPLE
+  make
+  sudo make install
+#+END_EXAMPLE
+
+*** First configuration steps:
+
+   1. The transparent clock machine must be set as a bridge so that Ethernet frames
+   can go through. Use the "setBridge.sh" script that uses the iproute2 tool to 
+   setup the bridge as following:
+
+#+BEGIN_EXAMPLE
+  sudo ./setBridge.sh -m a my_bridge -i ens2f0 -i ens2f1
+#+END_EXAMPLE
+
+#+BEGIN_EXAMPLE
+  sudo ./setBridge.sh -m d my_bridge
+#+END_EXAMPLE
+
+Options are:
+"-m <a|d>" (a=add, d=delete)
+"-n <name>"
+"-i <interface>" (interfaces added to the bridge)
+
+   2. The PTP messages should be blocked by the bridge to keep them for handling in
+ userspace instead of immediate transfer. When the bridge is UP, run:
+
+#+BEGIN_EXAMPLE
+  sudo ./setPtpBridgeRuleset.sh
+#+END_EXAMPLE
+
+That will filter (don't forward) the PTP multicast MAC addresses (linuxptp 
+should be running with IEEE 802.3 Ethernet transport).
+
+   3. In the TC, allow the system to synchronize its PHC devices (i.e., the 
+physical clocks attached to the different ports/interfaces) by running: 
+
+#+BEGIN_EXAMPLE
+  sudo phc2sys -am
+#+END_EXAMPLE
+
+Options are:
+"-m" (print messages)
+"-a" (automatically select PHC devices from the running ptp4l)
+
+   4. Finally, check that no other time synchronization is running in the TC and 
+the slave:
+
+#+BEGIN_EXAMPLE
+  sudo timedatectl status
+#+END_EXAMPLE
+
+If a network synchronization is on, enter the following to stop it: 
+
+#+BEGIN_EXAMPLE
+  systemctl stop systemd-timesyncd.service
+#+END_EXAMPLE
+
+Note: it can be necessary to 'disable' it instead (and reboot).
+
+*** Run:
+
+Simply add the following options to:
+
+#+BEGIN_EXAMPLE
+  sudo ptp4l
+#+END_EXAMPLE
+
+Common options:
+
+- Use these options in all cases:
+"-2" (Ethernet transport)
+"-P" (Peer delay measurements)
+"--tx_timestamp_timeout 50" (according to your system, it could be needed to 
+avoid 'poll tx timestamp timeout' error)
+
+- Other useful options:
+"-m" (print log messages - not PTP messages - in console)
+"-l 7" (print all debug)
+
+Other options depending on the clock instance type / position:
+
+- Master:
+"-i" <interface>
+
+- Slave:
+"-s" (slave only mode)
+"-i <interface>"
+
+- Transparent clock:
+"-T" (transparent clock mode)
+"-i <interface>" (master side port) 
+"-i <interface>" (slave side port)
+"--boundary_clock_jbod 1" (avoids the 'PHC device attached to port' error)
+"--free_running 1" (don't adjust own system clock)
+
+Of course a configuration file can be setup with the options described above
+and ptp4l configured with option:
+"-f <file>"
+
+
+** Contact
+
+Florian BITARD (f.bitard@gmail.com) - Avionics Master's student (ENAC, France)
+I'm currently running a Master's thesis at KTH (Stockholm, Sweden).
+You can also contact my supervisor: 
+György DÁN (gyuri@kth.se) - Professor at Network & Systems Engineering
+
+
+
+
+
