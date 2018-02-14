@@ -66,7 +66,7 @@ ethtool -T eth0
 
 * Installation
 
-** PTP stack
+** Basic PTP instance
 
 	1. Just type 'make'
 
@@ -79,8 +79,113 @@ ethtool -T eth0
 	  directories by setttings the variables prefix, sbindir, mandir,
 	  and man8dir on the make command line.
 
+** TC user guide
 
-###############################################################################
+	In what follows we describe the options that are used to compile and run the 
+	linuxptp instances to setup a master-TC-slave synchronization. 
+	To compile, simply use:
+
+#+BEGIN_EXAMPLE
+make
+sudo make install
+#+END_EXAMPLE
+
+*** First configuration steps:
+
+	1. The transparent clock machine must be set as a bridge so that Ethernet frames
+		can go through. Use the "setBridge.sh" script that uses the iproute2 tool to 
+		setup the bridge as following:
+		
+		#+BEGIN_EXAMPLE
+		sudo ./setBridge.sh -m a my_bridge -i ens2f0 -i ens2f1
+		#+END_EXAMPLE
+
+		#+BEGIN_EXAMPLE
+		sudo ./setBridge.sh -m d my_bridge
+		#+END_EXAMPLE
+		
+		Options are:
+		- "-m <a|d>" (a=add, d=delete)
+		- "-n <name>"
+		- "-i <interface>" (interfaces added to the bridge)
+		
+	2. The PTP messages should be blocked by the bridge to keep them for handling in
+		userspace instead of immediate transfer. When the bridge is UP, run:
+		
+		#+BEGIN_EXAMPLE
+		sudo ./setPtpBridgeRuleset.sh
+		#+END_EXAMPLE
+		
+		That will filter (don't forward) the PTP multicast MAC addresses (linuxptp 
+		should be running with IEEE 802.3 Ethernet transport).
+		
+	3. In the TC, allow the system to synchronize its PHC devices (i.e., the 
+		physical clocks attached to the different ports/interfaces) by running: 
+		
+		#+BEGIN_EXAMPLE
+		sudo phc2sys -am
+		#+END_EXAMPLE
+		
+		Options are:
+		- "-m" (print messages)
+		- "-a" (automatically select PHC devices from the running ptp4l)
+		
+	4. Finally, check that no other time synchronization is running in the TC and 
+		the slave:
+		
+		#+BEGIN_EXAMPLE
+		sudo timedatectl status
+		#+END_EXAMPLE
+		
+		If a network synchronization is on, enter the following to stop it: 
+		
+		#+BEGIN_EXAMPLE
+		systemctl stop systemd-timesyncd.service
+		#+END_EXAMPLE
+		
+		Note: it can be necessary to 'disable' it instead (and reboot).
+		
+*** Run:
+
+	Simply add the following options to:
+
+	#+BEGIN_EXAMPLE
+	sudo ptp4l
+	#+END_EXAMPLE
+
+	Common options:
+
+	- Use these options in all cases:
+		"-2" (Ethernet transport)
+		"-P" (Peer delay measurements)
+		"--tx_timestamp_timeout 50" (according to your system, it could be needed to 
+		avoid 'poll tx timestamp timeout' error)
+
+	- Other useful options:
+		"-m" (print log messages - not PTP messages - in console)
+		"-l 7" (print all debug)
+
+	Other options depending on the clock instance type / position:
+
+	- Master:
+		"-i" <interface>
+
+	- Slave:
+		"-s" (slave only mode)
+		"-i <interface>"
+
+	- Transparent clock:
+		"-T" (transparent clock mode)
+		"-i <interface>" (master side port) 
+		"-i <interface>" (slave side port)
+		"--boundary_clock_jbod 1" (avoids the 'PHC device attached to port' error)
+		"--free_running 1" (don't adjust own system clock)
+
+	Of course a configuration file can be setup with the options described above
+	and ptp4l configured with option:
+		"-f <file>"
+
+#########################################################################################
 * Patch features and content
 
 ** High-level functional changes in linuxptp code
@@ -276,116 +381,9 @@ grep -rn -A 1 "Transparent clock extension -->"
 *** tlv.h:
 	- TLV_TRANSPARENT (#define): hexadecimal value of TLV ID for clock 
 		management
-
-
-** User guide
-
-	In what follows we describe the options that are used to compile and run the 
-	linuxptp instances. 
-	To compile, simply use:
-
-	#+BEGIN_EXAMPLE
-	make
-	sudo make install
-	#+END_EXAMPLE
-
-*** First configuration steps:
-
-	1. The transparent clock machine must be set as a bridge so that Ethernet frames
-		can go through. Use the "setBridge.sh" script that uses the iproute2 tool to 
-		setup the bridge as following:
 		
-		#+BEGIN_EXAMPLE
-		sudo ./setBridge.sh -m a my_bridge -i ens2f0 -i ens2f1
-		#+END_EXAMPLE
 
-		#+BEGIN_EXAMPLE
-		sudo ./setBridge.sh -m d my_bridge
-		#+END_EXAMPLE
-		
-		Options are:
-		- "-m <a|d>" (a=add, d=delete)
-		- "-n <name>"
-		- "-i <interface>" (interfaces added to the bridge)
-		
-	2. The PTP messages should be blocked by the bridge to keep them for handling in
-		userspace instead of immediate transfer. When the bridge is UP, run:
-		
-		#+BEGIN_EXAMPLE
-		sudo ./setPtpBridgeRuleset.sh
-		#+END_EXAMPLE
-		
-		That will filter (don't forward) the PTP multicast MAC addresses (linuxptp 
-		should be running with IEEE 802.3 Ethernet transport).
-		
-	3. In the TC, allow the system to synchronize its PHC devices (i.e., the 
-		physical clocks attached to the different ports/interfaces) by running: 
-		
-		#+BEGIN_EXAMPLE
-		sudo phc2sys -am
-		#+END_EXAMPLE
-		
-		Options are:
-		- "-m" (print messages)
-		- "-a" (automatically select PHC devices from the running ptp4l)
-		
-	4. Finally, check that no other time synchronization is running in the TC and 
-		the slave:
-		
-		#+BEGIN_EXAMPLE
-		sudo timedatectl status
-		#+END_EXAMPLE
-		
-		If a network synchronization is on, enter the following to stop it: 
-		
-		#+BEGIN_EXAMPLE
-		systemctl stop systemd-timesyncd.service
-		#+END_EXAMPLE
-		
-		Note: it can be necessary to 'disable' it instead (and reboot).
-		
-*** Run:
-
-	Simply add the following options to:
-
-	#+BEGIN_EXAMPLE
-	sudo ptp4l
-	#+END_EXAMPLE
-
-	Common options:
-
-	- Use these options in all cases:
-		"-2" (Ethernet transport)
-		"-P" (Peer delay measurements)
-		"--tx_timestamp_timeout 50" (according to your system, it could be needed to 
-		avoid 'poll tx timestamp timeout' error)
-
-	- Other useful options:
-		"-m" (print log messages - not PTP messages - in console)
-		"-l 7" (print all debug)
-
-	Other options depending on the clock instance type / position:
-
-	- Master:
-		"-i" <interface>
-
-	- Slave:
-		"-s" (slave only mode)
-		"-i <interface>"
-
-	- Transparent clock:
-		"-T" (transparent clock mode)
-		"-i <interface>" (master side port) 
-		"-i <interface>" (slave side port)
-		"--boundary_clock_jbod 1" (avoids the 'PHC device attached to port' error)
-		"--free_running 1" (don't adjust own system clock)
-
-	Of course a configuration file can be setup with the options described above
-	and ptp4l configured with option:
-		"-f <file>"
-
-
-** Contact
+* Contact
 
 Florian BITARD (f.bitard@gmail.com) - Avionics Master's student (ENAC, France)
 I'm currently running a Master's thesis at KTH (Stockholm, Sweden).
