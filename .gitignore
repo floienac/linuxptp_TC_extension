@@ -1,9 +1,9 @@
 /*.d
 /*.o
-/.version
-/hwstamp_ctl
-/phc2sys
-/pmc
-/ptp4l
-/phc_ctl
-/timemaster
+linuxptp/.version
+linuxptp/hwstamp_ctl
+linuxptp/phc2sys
+linuxptp/pmc
+linuxptp/ptp4l
+linuxptp/phc_ctl
+linuxptp/timemaster
