@@ -1,3 +1,11 @@
+###############################################################################
+EDIT: This project was the public part of a secure TC extension lead at KTH, 
+Sweden.
+It has moved private and could be not up-to-date. If you are interested in 
+getting the last version, please ask to: f.bitard@gmail.com or gyuri@kth.se. 
+Thanks !
+###############################################################################
+
 * Introduction
 
 	This software is a patch to "linuxptp" implementing a PTP transparent 
